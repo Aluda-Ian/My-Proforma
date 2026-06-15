@@ -21,8 +21,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     foreach ($allowedKeys as $key) {
         if (isset($_POST[$key])) {
-            $stmt = $pdo->prepare("UPDATE settings SET setting_value = :val WHERE setting_key = :key");
-            $stmt->execute(['val' => trim($_POST[$key]), 'key' => $key]);
+            $val = trim($_POST[$key]);
+            // FIX: Using INSERT ON DUPLICATE KEY ensures that if the row was missing, 
+            // it gets created automatically. If it exists, it gets updated.
+            $stmt = $pdo->prepare("
+                INSERT INTO settings (setting_key, setting_value) 
+                VALUES (:key, :val) 
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+            ");
+            $stmt->execute(['key' => $key, 'val' => $val]);
         }
     }
 
@@ -81,7 +88,6 @@ function sv(array $settings, string $key): string {
 
         <form method="POST" class="space-y-8">
 
-            <!-- Environment Toggle -->
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                 <h2 class="text-lg font-bold text-[#002056] mb-4">🌐 Environment</h2>
                 <div class="grid grid-cols-2 gap-4">
@@ -102,7 +108,6 @@ function sv(array $settings, string $key): string {
                 </div>
             </div>
 
-            <!-- M-Pesa Shared Config -->
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                 <h2 class="text-lg font-bold text-[#002056] mb-1">📱 M-Pesa — Shared Config</h2>
                 <p class="text-sm text-gray-500 mb-5">These apply regardless of environment.</p>
@@ -122,7 +127,6 @@ function sv(array $settings, string $key): string {
                 </div>
             </div>
 
-            <!-- M-Pesa Sandbox -->
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                 <h2 class="text-lg font-bold text-[#002056] mb-1">🧪 M-Pesa — Sandbox Credentials</h2>
                 <p class="text-sm text-gray-500 mb-5">Used when environment is set to <strong>Sandbox</strong>.</p>
@@ -142,7 +146,6 @@ function sv(array $settings, string $key): string {
                 </div>
             </div>
 
-            <!-- M-Pesa Live -->
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                 <h2 class="text-lg font-bold text-[#002056] mb-1">🚀 M-Pesa — Live Credentials</h2>
                 <p class="text-sm text-gray-500 mb-5">Used when environment is set to <strong>Live</strong>.</p>
@@ -162,7 +165,6 @@ function sv(array $settings, string $key): string {
                 </div>
             </div>
 
-            <!-- Paystack -->
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                 <h2 class="text-lg font-bold text-[#002056] mb-1">💳 Paystack</h2>
                 <p class="text-sm text-gray-500 mb-5">Public keys for Paystack integration.</p>

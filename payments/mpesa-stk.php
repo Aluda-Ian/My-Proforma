@@ -19,8 +19,10 @@ $phone = preg_replace('/[\s\-+]/', '', $phone);
 if (str_starts_with($phone, '0')) {
     $phone = '254' . substr($phone, 1);
 }
-if (!preg_match('/^2547\d{8}$/', $phone)) {
-    echo json_encode(['success' => false, 'message' => 'Invalid Kenyan phone number. Use format 07XX XXX XXX.']);
+
+// Regex now accepts both 2547... and 2541... prefixes
+if (!preg_match('/^254(7|1)\d{8}$/', $phone)) {
+    echo json_encode(['success' => false, 'message' => 'Invalid Kenyan phone number. Use format 07XX XXX XXX or 01XX XXX XXX.']);
     exit;
 }
 
@@ -64,7 +66,8 @@ $authData    = json_decode($authResponse);
 $accessToken = $authData->access_token ?? null;
 
 if (!$accessToken) {
-    echo json_encode(['success' => false, 'message' => 'M-Pesa authentication failed. Check your API credentials.']);
+    // If auth fails, dump the raw response so we know why (e.g. invalid credentials)
+    echo json_encode(['success' => false, 'message' => 'M-Pesa auth failed. RAW: ' . $authResponse]);
     exit;
 }
 
@@ -72,10 +75,19 @@ if (!$accessToken) {
 $timestamp = date('YmdHis');
 $password  = base64_encode($shortcode . $passkey . $timestamp);
 
-// Dynamic callback URL based on current server host
-$scheme      = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$host        = $_SERVER['HTTP_HOST'] ?? 'localhost';
-$callbackUrl = $scheme . '://' . $host . '/munangwe-proforma/payments/callback.php';
+// ========================================================================
+// --- CALLBACK URL CONFIGURATION ---
+// ========================================================================
+
+// 1. ACTIVE TESTING URL: Update this to your live test domain or Ngrok URL
+$callbackUrl = 'https://myproforma.vendatechnologies.com/payments/callback.php';
+
+// 2. EVENTUAL PRODUCTION URL (Commented out for now):
+// $scheme      = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+// $host        = $_SERVER['HTTP_HOST'] ?? 'localhost';
+// $callbackUrl = $scheme . '://' . $host . '/payments/callback.php';
+
+// ========================================================================
 
 $stkUrl = $isLive
     ? 'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest'
@@ -85,14 +97,14 @@ $payload = json_encode([
     'BusinessShortCode' => $shortcode,
     'Password'          => $password,
     'Timestamp'         => $timestamp,
-    'TransactionType'   => 'CustomerPayBillOnline',
+    'TransactionType'   => 'CustomerPayBillOnline', // Or CustomerBuyGoodsOnline for Till numbers
     'Amount'            => $amount,
     'PartyA'            => $phone,
     'PartyB'            => $shortcode,
     'PhoneNumber'       => $phone,
     'CallBackURL'       => $callbackUrl,
     'AccountReference'  => 'MunangweRetirement',
-    'TransactionDesc'   => 'Contribution – John & Rose Munangwe Retirement',
+    'TransactionDesc'   => 'Contribution'
 ]);
 
 $curl = curl_init($stkUrl);
@@ -108,7 +120,7 @@ $stkError    = curl_error($curl);
 curl_close($curl);
 
 if ($stkError) {
-    echo json_encode(['success' => false, 'message' => 'STK push request failed. Please try again.']);
+    echo json_encode(['success' => false, 'message' => 'STK push request failed. cURL Error: ' . $stkError]);
     exit;
 }
 
@@ -128,7 +140,15 @@ if (isset($res->CheckoutRequestID)) {
         'message' => 'An M-Pesa prompt has been sent to ' . $phone . '. Enter your PIN to complete the payment.',
     ]);
 } else {
-    $errorMessage = $res->errorMessage ?? ($res->ResponseDescription ?? 'Unknown error from M-Pesa.');
+    // --- RAW ERROR REVEAL ---
+    // This will capture the EXACT reason Safaricom is rejecting the push
+    $errorMessage = $res->errorMessage ?? ($res->ResponseDescription ?? 'RAW ERROR: ' . $stkResponse);
+    
+    // If the response is totally empty, it's usually an HTTP routing error
+    if (empty($stkResponse)) {
+        $errorMessage = "Empty Response from Safaricom. Possible network issue.";
+    }
+
     echo json_encode(['success' => false, 'message' => 'M-Pesa error: ' . $errorMessage]);
 }
 ?>
